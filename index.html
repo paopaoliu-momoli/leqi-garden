@@ -502,8 +502,10 @@ canvas{border-radius:16px;box-shadow:var(--shadow);max-width:100%;touch-action:m
       <div class="card">
         <div class="board-wrap">
           <div class="chips" style="justify-content:center;margin-bottom:2px">
-            <button class="chip on" data-gmdiff="hard">⚡ 认真下（会思考）</button>
-            <button class="chip" data-gmdiff="easy">🌱 陪我练（让让你）</button>
+            <button class="chip" data-gmdiff="baby">🐣 新手陪玩（让很多）</button>
+            <button class="chip on" data-gmdiff="easy">🌿 陪我练（会让几手）</button>
+            <button class="chip" data-gmdiff="jia">🔥 加把劲（小挑战）</button>
+            <button class="chip" data-gmdiff="hard">⚡ 认真下（会思考）</button>
           </div>
           <div class="board-bar">
             <button class="btn small" id="gmNew">重新开始</button>
@@ -522,8 +524,10 @@ canvas{border-radius:16px;box-shadow:var(--shadow);max-width:100%;touch-action:m
       <div class="card">
         <div class="board-wrap">
           <div class="chips" style="justify-content:center;margin-bottom:2px">
-            <button class="chip on" data-chdiff="hard">⚡ 认真下（会思考）</button>
-            <button class="chip" data-chdiff="easy">🌱 陪我练（让让你）</button>
+            <button class="chip" data-chdiff="baby">🐣 新手陪玩（让很多）</button>
+            <button class="chip on" data-chdiff="easy">🌿 陪我练（会让几手）</button>
+            <button class="chip" data-chdiff="jia">🔥 加把劲（小挑战）</button>
+            <button class="chip" data-chdiff="hard">⚡ 认真下（会思考）</button>
           </div>
           <div class="board-bar">
             <button class="btn small" id="chNew">重新开始</button>
@@ -1612,7 +1616,7 @@ $$('#gameTabs .gtab').forEach(b => b.onclick = () => {
 });
 
 /* ---------------- 五子棋 ---------------- */
-const GM = { n: 15, size: 600, pad: 32, board: [], turn: 1, over: false, hist: [], mode: 'ai', diff: 'hard', last: null };
+const GM = { n: 15, size: 600, pad: 32, board: [], turn: 1, over: false, hist: [], mode: 'ai', diff: 'easy', last: null };
 
 function gmXY(i) { return GM.pad + i * ((GM.size - GM.pad * 2) / (GM.n - 1)); }
 function gmInit() {
@@ -1704,14 +1708,57 @@ function gmScoreAt(r, c, v) {
   }
   return total;
 }
-function gmGreedyMove() {
-  let best = null, bestV = -1;
-  const cands = gmCands(999);
-  if (!cands.length) return null;
-  for (const [r, c] of cands) {
-    const atk = gmScoreAt(r, c, 2);
-    const def = gmScoreAt(r, c, 1);
-    const v = atk * 1.02 + def * 0.95 + Math.random() * 3;
+function gmPickOf(list) { return list[Math.floor(Math.random() * list.length)]; }
+function gmFreeSpots() { return gmCands(999); }
+function gmImmediateWins(v) {
+  const out = [];
+  for (const [r, c] of gmFreeSpots()) {
+    GM.board[r][c] = v;
+    if (gmWinAt(r, c, v)) out.push([r, c]);
+    GM.board[r][c] = 0;
+  }
+  return out;
+}
+function gmCasualMove() {
+  const spots = gmFreeSpots();
+  if (!spots.length) return null;
+  if (Math.random() < 0.65) {
+    const near = spots.filter(([r, c]) => {
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        if (!dr && !dc) continue;
+        const rr = r + dr, cc = c + dc;
+        if (rr >= 0 && rr < GM.n && cc >= 0 && cc < GM.n && GM.board[rr][cc]) return true;
+      }
+      return false;
+    });
+    if (near.length) return gmPickOf(near);
+  }
+  return gmPickOf(spots);
+}
+/* 「新手陪玩 / 陪我练 / 加把劲」：会看基本棋型，但按难度故意走漏、放水 */
+const GM_CONF = {
+  baby: { self: 0.28, block: 0.15, casual: 0.70, def: 0.04, noise: 1100 },
+  easy: { self: 0.46, block: 0.38, casual: 0.50, def: 0.22, noise: 950 },
+  jia: { self: 0.70, block: 0.65, casual: 0.24, def: 0.42, noise: 750 }
+};
+function gmGentleMove(level) {
+  const conf = GM_CONF[level] || GM_CONF.easy;
+  if (!gmFreeSpots().length) return null;
+  // 1) 自己下一步能连五：按这个难度的“眼力”决定要不要赢
+  const mine = gmImmediateWins(2);
+  if (mine.length && Math.random() < conf.self) return gmPickOf(mine);
+  // 2) 你下一步能连五：新手常常“没看见”，让乐其赢下来
+  const yours = gmImmediateWins(1);
+  if (yours.length) {
+    if (Math.random() < conf.block) return gmPickOf(yours);
+    return gmCasualMove();
+  }
+  // 3) 平时：这个概率下随手走一手（经常下在没啥用的地方）
+  if (Math.random() < conf.casual) return gmCasualMove();
+  // 4) 否则只顾自己连子，防守权重很低
+  let best = null, bestV = -Infinity;
+  for (const [r, c] of gmFreeSpots()) {
+    const v = gmScoreAt(r, c, 2) + gmScoreAt(r, c, 1) * conf.def + Math.random() * conf.noise;
     if (v > bestV) { bestV = v; best = [r, c]; }
   }
   return best;
@@ -1796,7 +1843,7 @@ function gmSearchMove() {
   let best = null, bestV = -Infinity;
   for (const [r, c] of cands) {
     GM.board[r][c] = 2;
-    const val = -gmSearch(2, -Infinity, Infinity, 1);
+    const val = -gmSearch(3, -Infinity, Infinity, 1);
     GM.board[r][c] = 0;
     if (val > bestV) { bestV = val; best = [r, c]; }
   }
@@ -1804,7 +1851,7 @@ function gmSearchMove() {
 }
 function gmAI() {
   if (GM.over) return;
-  const best = (GM.diff === 'hard') ? gmSearchMove() : gmGreedyMove();
+  const best = (GM.diff === 'hard') ? gmSearchMove() : gmGentleMove(GM.diff);
   if (!best) return;
   gmPlace(best[0], best[1], 2);
   if (!GM.over) { GM.turn = 1; $('#gmStatus').textContent = '电脑想好了，轮到你（黑棋）'; }
@@ -1856,7 +1903,7 @@ function initGomoku() {
 /* ---------------- 中国象棋 ---------------- */
 const CH = {
   board: null, turn: 'r', over: false, sel: null, hist: [], last: null,
-  mode: 'ai', diff: 'hard', flip: false, selMoves: []
+  mode: 'ai', diff: 'easy', flip: false, selMoves: []
 };
 const NAMES = {
   r: { K: '帅', A: '仕', B: '相', N: '马', R: '车', C: '炮', P: '兵' },
@@ -2028,14 +2075,32 @@ function bestReplyGain(b, color) {
   return best;
 }
 /* --- 「陪我练」：一步贪心（吃子 + 防守） --- */
-function chGreedyPick(moves) {
-  let best = null, bestV = -1e9;
+/* 「新手陪玩 / 陪我练」：只看眼前吃子，按难度故意走漏、不护子 */
+function chPickOf(list) { return list[Math.floor(Math.random() * list.length)]; }
+function chCapVal(m) { const t = CH.board[m[2]][m[3]]; return t ? VAL[t.t] : 0; }
+function chCasualMove(moves) {
+  // 随手走一步，尽量不动大子，显得像初学的小朋友
+  const quiet = moves.filter(m => !chCapVal(m));
+  return chPickOf(quiet.length ? quiet : moves);
+}
+const CH_CONF = {
+  baby: { casual: 0.72, cap: 0.40, back: 0.0, noise: 700 },
+  easy: { casual: 0.34, cap: 0.82, back: 0.35, noise: 220 },
+  jia: { casual: 0.10, cap: 0.95, back: 0.72, noise: 90 }
+};
+function chGentlePick(moves, level) {
+  const conf = CH_CONF[level] || CH_CONF.easy;
+  if (!moves.length) return null;
+  if (Math.random() < conf.casual) return chCasualMove(moves);
+  const caps = moves.filter(m => chCapVal(m) > 0).sort((a, b) => chCapVal(b) - chCapVal(a));
+  if (caps.length && Math.random() < conf.cap) return caps[0];
+  let best = null, bestV = -Infinity;
   for (const m of moves) {
     const nb = cloneBoard(CH.board);
     nb[m[2]][m[3]] = nb[m[0]][m[1]]; nb[m[0]][m[1]] = null;
     let v = evaluate(nb, 'b');
-    v -= bestReplyGain(nb, 'r') * 0.9;
-    v += Math.random() * 8;
+    if (conf.back) v -= bestReplyGain(nb, 'r') * conf.back;
+    v += Math.random() * conf.noise;
     if (v > bestV) { bestV = v; best = m; }
   }
   return best;
@@ -2126,7 +2191,7 @@ function chAIMove() {
     chStatus(kingSafe(CH.board, 'b') ? '黑方无子可动，和棋' : '🎉 你把黑方将死了，赢了！', true);
     return;
   }
-  const best = (CH.diff === 'hard') ? chBestPick(moves) : chGreedyPick(moves);
+  const best = (CH.diff === 'hard') ? chBestPick(moves) : chGentlePick(moves, CH.diff);
   if (!best) return;
   chDo(best[0], best[1], best[2], best[3]);
   if (!CH.over) {
@@ -2331,17 +2396,23 @@ function initIdiom() {
 }
 
 /* ---------------- 游戏难度切换 ---------------- */
+const DIFF_TIP = {
+  baby: '电脑变成小新手啦，会经常走漏，放心试',
+  easy: '电脑会让着你几手，输了也不怕',
+  jia: '电脑有点实力了，要动脑筋才能赢它',
+  hard: '电脑要认真下了，小心应战'
+};
 $$('[data-gmdiff]').forEach(b => b.onclick = () => {
   $$('[data-gmdiff]').forEach(x => x.classList.toggle('on', x === b));
   GM.diff = b.dataset.gmdiff;
   gmInit();
-  toast(GM.diff === 'hard' ? '电脑要认真下了，小心应战' : '电脑会让着你，放心下');
+  toast(DIFF_TIP[GM.diff]);
 });
 $$('[data-chdiff]').forEach(b => b.onclick = () => {
   $$('[data-chdiff]').forEach(x => x.classList.toggle('on', x === b));
   CH.diff = b.dataset.chdiff;
   chInit();
-  toast(CH.diff === 'hard' ? '电脑要认真下了，小心应战' : '电脑会让着你，放心下');
+  toast(DIFF_TIP[CH.diff]);
 });
 
 /* ---------------- 脑筋急转弯 ---------------- */
